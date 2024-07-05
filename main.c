@@ -5,6 +5,7 @@
 #include <SDL2/SDL_rect.h>
 #include <SDL2/SDL_render.h>
 #include <SDL2/SDL_stdinc.h>
+#include <SDL2/SDL_timer.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -20,7 +21,7 @@ void paint_image_strip(SDL_Renderer *renderer, stbi_uc *img_data,
 
     int num_iterations = STRIP_WIDTH * img_height;
 
-    int i = STRIP_WIDTH * img_height * strip_number * 3;
+    int i = STRIP_WIDTH * strip_number * 3;
 
     int x = STRIP_WIDTH * strip_number;
     int y = 0;
@@ -35,7 +36,7 @@ void paint_image_strip(SDL_Renderer *renderer, stbi_uc *img_data,
             x = STRIP_WIDTH * strip_number;
             y += 1;
 
-            i = STRIP_WIDTH * img_height * strip_number * 3 + img_width * 3 * y;
+            i = STRIP_WIDTH * strip_number * 3 + img_width * 3 * y;
 
             // printf("i: %d\n", i);
 
@@ -76,12 +77,10 @@ int main() {
 
     int height, width;
 
-    SDL_Texture *image = IMG_LoadTexture(renderer, "./tux.png");
-    SDL_QueryTexture(image, NULL, NULL, &width,
-                     &height); // get the width and height of the texture
-
     int quit = 0;
     SDL_Event e;
+
+    int strip_number = 0;
 
     while (!quit) {
         while (SDL_PollEvent(&e) != 0) {
@@ -104,11 +103,16 @@ int main() {
 
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
         SDL_RenderClear(renderer);
-        paint_image_strip(renderer, img_data, 0, img_height, img_width);
+
+        paint_image_strip(renderer, img_data, strip_number, img_height,
+                          img_width);
+        strip_number = strip_number == 10 ? 0 : strip_number + 1;
+
+        SDL_Delay(100);
+
         SDL_RenderPresent(renderer);
     }
 
-    SDL_DestroyTexture(image);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
 
