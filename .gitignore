@@ -2,3 +2,4 @@
 *.ppm
 bin/
 *.jpg
+stb_image.h
