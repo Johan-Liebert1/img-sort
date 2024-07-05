@@ -1,8 +1,10 @@
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_events.h>
 #include <SDL2/SDL_image.h>
+#include <SDL2/SDL_pixels.h>
 #include <SDL2/SDL_rect.h>
 #include <SDL2/SDL_render.h>
+#include <SDL2/SDL_stdinc.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -11,33 +13,39 @@
 #include "stb_image.h"
 
 #define WIN_ASPECT_RATIO_FACTOR 100
+#define STRIP_WIDTH 50 // 20 px
 
-int png_to_ppm() {
-    int channels, width, height;
-    stbi_uc *img_data = stbi_load("./tux.png", &width, &height, &channels, 3);
-    printf("channels: %d, width: %d, height: %d\n", channels, width, height);
+void paint_image_strip(SDL_Renderer *renderer, stbi_uc *img_data,
+                       int strip_number, int img_height, int img_width) {
 
-    int fd = open("./rgba.ppm", O_RDWR | O_TRUNC, 0666);
+    int num_iterations = STRIP_WIDTH * img_height;
 
-    if (fd < 0) {
-        perror("open");
-        printf("fd: %d\n", fd);
-        return fd;
+    int i = STRIP_WIDTH * img_height * strip_number * 3;
+
+    int x = STRIP_WIDTH * strip_number;
+    int y = 0;
+
+    for (int iter = 0; iter <= num_iterations; iter++) {
+        SDL_SetRenderDrawColor(renderer, img_data[i], img_data[i + 1],
+                               img_data[i + 2], 255);
+
+        SDL_RenderDrawPoint(renderer, x, y);
+
+        if (iter != 0 && iter % STRIP_WIDTH == 0) {
+            x = STRIP_WIDTH * strip_number;
+            y += 1;
+
+            i = STRIP_WIDTH * img_height * strip_number * 3 + img_width * 3 * y;
+
+            // printf("i: %d\n", i);
+
+            continue;
+        }
+
+        x += 1;
+        i += 3;
+        // printf("i: %d\n", i);
     }
-
-    char buf[1024];
-    int n = sprintf(buf, "P3\n%d %d\n255\n", width, height);
-
-    write(fd, buf, n);
-
-    for (int i = 0; i < width * height * channels; i += channels) {
-        n = sprintf(buf, "%d %d %d\n", img_data[i], img_data[i + 1],
-                    img_data[i + 2]);
-
-        write(fd, buf, n);
-    }
-
-    return 0;
 }
 
 int main() {
@@ -46,10 +54,16 @@ int main() {
         return 1;
     }
 
-    SDL_Window *window =
-        SDL_CreateWindow("Mah window", SDL_WINDOWPOS_UNDEFINED,
-                         SDL_WINDOWPOS_UNDEFINED, 16 * WIN_ASPECT_RATIO_FACTOR,
-                         9 * WIN_ASPECT_RATIO_FACTOR, SDL_WINDOW_SHOWN);
+    int channels, img_width, img_height;
+    stbi_uc *img_data =
+        stbi_load("./testimage.jpg", &img_width, &img_height, &channels, 3);
+
+    printf("channels: %d, img_width: %d, img_height: %d\n", channels, img_width,
+           img_height);
+
+    SDL_Window *window = SDL_CreateWindow(
+        "Mah window", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
+        img_width, img_height, SDL_WINDOW_SHOWN | SDL_WINDOW_ALLOW_HIGHDPI);
 
     if (window == NULL) {
         printf("Window could not be created! SDL_Error: %s\n", SDL_GetError());
@@ -59,7 +73,6 @@ int main() {
 
     SDL_Renderer *renderer =
         SDL_CreateRenderer(window, 0, SDL_RENDERER_ACCELERATED);
-
 
     int height, width;
 
@@ -89,9 +102,9 @@ int main() {
             }
         }
 
+        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
         SDL_RenderClear(renderer);
-        SDL_RenderCopy(renderer, image, NULL,
-                       &(SDL_Rect){.x = 0, .y = 0, .w = width, .h = height});
+        paint_image_strip(renderer, img_data, 0, img_height, img_width);
         SDL_RenderPresent(renderer);
     }
 
