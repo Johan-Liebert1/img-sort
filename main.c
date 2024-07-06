@@ -16,21 +16,63 @@
 
 #define WIN_ASPECT_RATIO_FACTOR 100
 #define STRIP_WIDTH 25
-#define ANIMATION_DELAY_MS 50
+#define ANIMATION_DELAY_MS 0
 
-void paint_image_strip(SDL_Renderer *renderer, Image* image,
-                       int img_strip_number, int window_strip_number) {
+void paint_image_strip(SDL_Renderer *renderer, Image *image, int img_strip_number, int window_strip_number) {
+    int strip_height = image->height;
+    int num_channels = image->channels;
 
+    // Create an SDL texture to hold the image strip
+    SDL_Texture *texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_STREAMING, STRIP_WIDTH, strip_height);
+
+    if (!texture) {
+        fprintf(stderr, "SDL_CreateTexture failed: %s\n", SDL_GetError());
+        return;
+    }
+
+    Uint32 *pixels = (Uint32 *)malloc(STRIP_WIDTH * strip_height * sizeof(Uint32));
+
+    if (!pixels) {
+        fprintf(stderr, "Buy more ram lol\n");
+        SDL_DestroyTexture(texture);
+        return;
+    }
+
+    for (int y = 0; y < strip_height; y++) {
+        for (int x = 0; x < STRIP_WIDTH; x++) {
+            int img_index = (y * image->width + (img_strip_number * STRIP_WIDTH + x)) * num_channels;
+
+            int pix_index = y * STRIP_WIDTH + x;
+
+            Uint8 r = image->img_data[img_index];
+            Uint8 g = image->img_data[img_index + 1];
+            Uint8 b = image->img_data[img_index + 2];
+            Uint8 a = 255;
+
+            pixels[pix_index] = (r << 24) | (g << 16) | (b << 8) | a;
+        }
+    }
+
+    // Update the texture with the pixel data
+    SDL_UpdateTexture(texture, NULL, pixels, STRIP_WIDTH * sizeof(Uint32));
+    SDL_Rect dest_rect = {STRIP_WIDTH * window_strip_number, 0, STRIP_WIDTH, strip_height};
+
+    SDL_RenderCopy(renderer, texture, NULL, &dest_rect);
+
+    free(pixels);
+    SDL_DestroyTexture(texture);
+}
+
+void paint_image_strip_slow_af(SDL_Renderer *renderer, Image *image, int img_strip_number, int window_strip_number) {
     int num_iterations = STRIP_WIDTH * image->height;
 
-    int i = STRIP_WIDTH * img_strip_number * 3;
+    int i = STRIP_WIDTH * img_strip_number * image->channels;
 
     int x = STRIP_WIDTH * window_strip_number;
     int y = 0;
 
     for (int iter = 0; iter <= num_iterations; iter++) {
-        SDL_SetRenderDrawColor(renderer, image->img_data[i], image->img_data[i + 1],
-                               image->img_data[i + 2], 255);
+        SDL_SetRenderDrawColor(renderer, image->img_data[i], image->img_data[i + 1], image->img_data[i + 2], 255);
 
         SDL_RenderDrawPoint(renderer, x, y);
 
@@ -38,21 +80,17 @@ void paint_image_strip(SDL_Renderer *renderer, Image* image,
             x = STRIP_WIDTH * window_strip_number;
             y += 1;
 
-            i = STRIP_WIDTH * img_strip_number * 3 + image->width * 3 * y;
-
-            // printf("i: %d\n", i);
+            i = STRIP_WIDTH * img_strip_number * image->channels + image->width * image->channels * y;
 
             continue;
         }
 
         x += 1;
-        i += 3;
-        // printf("i: %d\n", i);
+        i += image->channels;
     }
 }
 
-void render_image(SDL_Renderer *renderer, int array[], size_t array_size,
-                  Image *image) {
+void render_image(SDL_Renderer *renderer, int array[], size_t array_size, Image *image) {
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
     SDL_RenderClear(renderer);
 
@@ -60,7 +98,9 @@ void render_image(SDL_Renderer *renderer, int array[], size_t array_size,
         paint_image_strip(renderer, image, i, array[i]);
     }
 
-    SDL_Delay(ANIMATION_DELAY_MS);
+    if (ANIMATION_DELAY_MS > 0) {
+        SDL_Delay(ANIMATION_DELAY_MS);
+    }
 
     SDL_RenderPresent(renderer);
 }
@@ -73,15 +113,12 @@ int main() {
 
     Image image = {};
 
-    image.img_data = stbi_load("./testimage.jpg", &image.width, &image.height,
-                               &image.channels, 3);
+    image.img_data = stbi_load("./testimage.jpg", &image.width, &image.height, &image.channels, 3);
 
-    printf("channels: %d, img_width: %d, img_height: %d\n", image.channels,
-           image.width, image.height);
+    printf("channels: %d, img_width: %d, img_height: %d\n", image.channels, image.width, image.height);
 
-    SDL_Window *window = SDL_CreateWindow(
-        "Mah window", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
-        image.width, image.height, SDL_WINDOW_SHOWN | SDL_WINDOW_ALLOW_HIGHDPI);
+    SDL_Window *window = SDL_CreateWindow("Mah window", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, image.width, image.height,
+                                          SDL_WINDOW_SHOWN | SDL_WINDOW_ALLOW_HIGHDPI);
 
     if (window == NULL) {
         printf("Window could not be created! SDL_Error: %s\n", SDL_GetError());
@@ -89,15 +126,13 @@ int main() {
         return 1;
     }
 
-    SDL_Renderer *renderer =
-        SDL_CreateRenderer(window, 0, SDL_RENDERER_ACCELERATED);
+    SDL_Renderer *renderer = SDL_CreateRenderer(window, 0, SDL_RENDERER_ACCELERATED);
 
     int height, width;
 
     int quit = 0;
     SDL_Event e;
 
-    int strip_number = 0;
     int sorting = 0;
 
     int array_size = image.width / STRIP_WIDTH;
@@ -124,8 +159,8 @@ int main() {
                             printf("Starting sort\n");
 
                             sorting = 1;
-                            binary_search(array, array_size, render_image,
-                                          renderer, &image);
+
+                            binary_search(array, array_size, render_image, renderer, &image);
                             break;
                         }
 
