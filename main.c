@@ -1,6 +1,7 @@
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_events.h>
 #include <SDL2/SDL_image.h>
+#include <SDL2/SDL_keycode.h>
 #include <SDL2/SDL_pixels.h>
 #include <SDL2/SDL_rect.h>
 #include <SDL2/SDL_render.h>
@@ -11,32 +12,33 @@
 #include <unistd.h>
 
 #define STB_IMAGE_IMPLEMENTATION
-#include "stb_image.h"
+#include "sort/sort.h"
 
 #define WIN_ASPECT_RATIO_FACTOR 100
-#define STRIP_WIDTH 50 // 20 px
+#define STRIP_WIDTH 25
+#define ANIMATION_DELAY_MS 50
 
-void paint_image_strip(SDL_Renderer *renderer, stbi_uc *img_data,
-                       int strip_number, int img_height, int img_width) {
+void paint_image_strip(SDL_Renderer *renderer, Image* image,
+                       int img_strip_number, int window_strip_number) {
 
-    int num_iterations = STRIP_WIDTH * img_height;
+    int num_iterations = STRIP_WIDTH * image->height;
 
-    int i = STRIP_WIDTH * strip_number * 3;
+    int i = STRIP_WIDTH * img_strip_number * 3;
 
-    int x = STRIP_WIDTH * strip_number;
+    int x = STRIP_WIDTH * window_strip_number;
     int y = 0;
 
     for (int iter = 0; iter <= num_iterations; iter++) {
-        SDL_SetRenderDrawColor(renderer, img_data[i], img_data[i + 1],
-                               img_data[i + 2], 255);
+        SDL_SetRenderDrawColor(renderer, image->img_data[i], image->img_data[i + 1],
+                               image->img_data[i + 2], 255);
 
         SDL_RenderDrawPoint(renderer, x, y);
 
         if (iter != 0 && iter % STRIP_WIDTH == 0) {
-            x = STRIP_WIDTH * strip_number;
+            x = STRIP_WIDTH * window_strip_number;
             y += 1;
 
-            i = STRIP_WIDTH * strip_number * 3 + img_width * 3 * y;
+            i = STRIP_WIDTH * img_strip_number * 3 + image->width * 3 * y;
 
             // printf("i: %d\n", i);
 
@@ -49,22 +51,37 @@ void paint_image_strip(SDL_Renderer *renderer, stbi_uc *img_data,
     }
 }
 
+void render_image(SDL_Renderer *renderer, int array[], size_t array_size,
+                  Image *image) {
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+    SDL_RenderClear(renderer);
+
+    for (int i = 0; i < array_size; i++) {
+        paint_image_strip(renderer, image, i, array[i]);
+    }
+
+    SDL_Delay(ANIMATION_DELAY_MS);
+
+    SDL_RenderPresent(renderer);
+}
+
 int main() {
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
         printf("SDL initialization failed! %s\n", SDL_GetError());
         return 1;
     }
 
-    int channels, img_width, img_height;
-    stbi_uc *img_data =
-        stbi_load("./testimage.jpg", &img_width, &img_height, &channels, 3);
+    Image image = {};
 
-    printf("channels: %d, img_width: %d, img_height: %d\n", channels, img_width,
-           img_height);
+    image.img_data = stbi_load("./testimage.jpg", &image.width, &image.height,
+                               &image.channels, 3);
+
+    printf("channels: %d, img_width: %d, img_height: %d\n", image.channels,
+           image.width, image.height);
 
     SDL_Window *window = SDL_CreateWindow(
         "Mah window", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
-        img_width, img_height, SDL_WINDOW_SHOWN | SDL_WINDOW_ALLOW_HIGHDPI);
+        image.width, image.height, SDL_WINDOW_SHOWN | SDL_WINDOW_ALLOW_HIGHDPI);
 
     if (window == NULL) {
         printf("Window could not be created! SDL_Error: %s\n", SDL_GetError());
@@ -81,6 +98,14 @@ int main() {
     SDL_Event e;
 
     int strip_number = 0;
+    int sorting = 0;
+
+    int array_size = image.width / STRIP_WIDTH;
+    int array[array_size];
+
+    for (int i = array_size - 1; i >= 0; i--) {
+        array[i] = array_size - i - 1;
+    }
 
     while (!quit) {
         while (SDL_PollEvent(&e) != 0) {
@@ -94,6 +119,16 @@ int main() {
                             quit = 1;
                             break;
                         }
+
+                        case SDLK_s: {
+                            printf("Starting sort\n");
+
+                            sorting = 1;
+                            binary_search(array, array_size, render_image,
+                                          renderer, &image);
+                            break;
+                        }
+
                         default:
                             break;
                     }
@@ -101,16 +136,9 @@ int main() {
             }
         }
 
-        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-        SDL_RenderClear(renderer);
-
-        paint_image_strip(renderer, img_data, strip_number, img_height,
-                          img_width);
-        strip_number = strip_number == 10 ? 0 : strip_number + 1;
-
-        SDL_Delay(100);
-
-        SDL_RenderPresent(renderer);
+        if (!sorting) {
+            render_image(renderer, array, array_size, &image);
+        }
     }
 
     SDL_DestroyRenderer(renderer);
