@@ -15,7 +15,7 @@ typedef struct {
 typedef void (*callback)(SDL_Renderer *renderer, int array[], size_t array_size,
                          Image *image);
 
-void binary_search(int array[], size_t length, callback callback_func, SDL_Renderer *renderer, Image *image);
+void binary_sort(int array[], size_t length, callback callback_func, SDL_Renderer *renderer, Image *image);
 void shuffle_array(int array[], size_t length);
 
 #endif // SORT

@@ -8,7 +8,9 @@
 #include <SDL2/SDL_stdinc.h>
 #include <SDL2/SDL_timer.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <stdio.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 #define STB_IMAGE_IMPLEMENTATION
@@ -17,6 +19,21 @@
 #define WIN_ASPECT_RATIO_FACTOR 100
 #define STRIP_WIDTH 25
 #define ANIMATION_DELAY_MS 0
+
+enum SortType {
+    BinarySort,
+};
+
+typedef struct {
+    Image *image;
+    SDL_Renderer *renderer;
+    enum SortType sort_type;
+    size_t array_size;
+    int *array;
+} StartSort;
+
+// Unused for now
+pthread_mutex_t renderer_mutex;
 
 void paint_image_strip(SDL_Renderer *renderer, Image *image, int img_strip_number, int window_strip_number) {
     int strip_height = image->height;
@@ -105,6 +122,20 @@ void render_image(SDL_Renderer *renderer, int array[], size_t array_size, Image 
     SDL_RenderPresent(renderer);
 }
 
+void *start_sort(void *arg) {
+    StartSort *start_sort = (StartSort *)arg;
+
+    printf("renderer: %p\n", start_sort->renderer);
+
+    switch (start_sort->sort_type) {
+        case BinarySort:
+            binary_sort(start_sort->array, start_sort->array_size, render_image, start_sort->renderer, start_sort->image);
+            break;
+    }
+
+    return NULL;
+}
+
 int main() {
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
         printf("SDL initialization failed! %s\n", SDL_GetError());
@@ -126,7 +157,7 @@ int main() {
         return 1;
     }
 
-    SDL_Renderer *renderer = SDL_CreateRenderer(window, 0, SDL_RENDERER_ACCELERATED);
+    SDL_Renderer *renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
 
     int height, width;
 
@@ -160,7 +191,23 @@ int main() {
 
                             sorting = 1;
 
-                            binary_search(array, array_size, render_image, renderer, &image);
+                            pthread_t thread_id;
+
+                            StartSort args = {
+                                .image = &image,
+                                .renderer = renderer,
+                                .sort_type = BinarySort,
+                                .array = array,
+                                .array_size = array_size,
+                            };
+
+                            start_sort(&args);
+
+                            // Apparantly it's illegal to render in a separate thread.
+                            // Mutex locking doesn't work either
+                            //
+                            // pthread_create(&thread_id, NULL, start_sort, &args);
+
                             break;
                         }
 
