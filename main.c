@@ -20,6 +20,9 @@
 #define STRIP_WIDTH 25
 #define ANIMATION_DELAY_MS 0
 
+#define READ_END 0
+#define WRITE_END 1
+
 enum SortType {
     BinarySort,
 };
@@ -30,6 +33,8 @@ typedef struct {
     enum SortType sort_type;
     size_t array_size;
     int *array;
+    int render_to_video;
+    FFMpeg *ffmpeg;
 } StartSort;
 
 // Unused for now
@@ -107,7 +112,7 @@ void paint_image_strip_slow_af(SDL_Renderer *renderer, Image *image, int img_str
     }
 }
 
-void render_image(SDL_Renderer *renderer, int array[], size_t array_size, Image *image) {
+void render_image(SDL_Renderer *renderer, int array[], size_t array_size, Image *image, FFMpeg *ffmpeg) {
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
     SDL_RenderClear(renderer);
 
@@ -120,16 +125,34 @@ void render_image(SDL_Renderer *renderer, int array[], size_t array_size, Image 
     }
 
     SDL_RenderPresent(renderer);
+
+    if (ffmpeg != NULL) {
+        int size = image->width * image->height * sizeof(Uint32);
+        Uint32 *pixels = (Uint32 *)malloc(size);
+
+        int ret = SDL_RenderReadPixels(renderer, NULL, SDL_PIXELFORMAT_ARGB8888, pixels, image->width * sizeof(Uint32));
+
+        if (ret != 0) {
+            fprintf(stderr, "SDL_RenderReadPixels failed: %s\n", SDL_GetError());
+            free(pixels);
+        }
+
+        FILE *f = fopen("pixels", "a");
+        fwrite(pixels, size, size, f);
+
+        // int n = write(ffmpeg->std_in, image->img_data, size);
+        // if (n != size) {
+        //     perror("write failed");
+        // }
+    }
 }
 
 void *start_sort(void *arg) {
     StartSort *start_sort = (StartSort *)arg;
 
-    printf("renderer: %p\n", start_sort->renderer);
-
     switch (start_sort->sort_type) {
         case BinarySort:
-            binary_sort(start_sort->array, start_sort->array_size, render_image, start_sort->renderer, start_sort->image);
+            binary_sort(start_sort->array, start_sort->array_size, render_image, start_sort->renderer, start_sort->image, start_sort->ffmpeg);
             break;
     }
 
@@ -144,7 +167,7 @@ int main() {
 
     Image image = {};
 
-    image.img_data = stbi_load("./testimage.jpg", &image.width, &image.height, &image.channels, 3);
+    image.img_data = stbi_load("./troll.jpg", &image.width, &image.height, &image.channels, 3);
 
     printf("channels: %d, img_width: %d, img_height: %d\n", image.channels, image.width, image.height);
 
@@ -173,6 +196,14 @@ int main() {
         array[i] = array_size - i - 1;
     }
 
+    StartSort args = {
+        .image = &image,
+        .renderer = renderer,
+        .sort_type = BinarySort,
+        .array = array,
+        .array_size = array_size,
+    };
+
     while (!quit) {
         while (SDL_PollEvent(&e) != 0) {
             switch (e.type) {
@@ -188,25 +219,66 @@ int main() {
 
                         case SDLK_s: {
                             printf("Starting sort\n");
-
                             sorting = 1;
-
-                            pthread_t thread_id;
-
-                            StartSort args = {
-                                .image = &image,
-                                .renderer = renderer,
-                                .sort_type = BinarySort,
-                                .array = array,
-                                .array_size = array_size,
-                            };
-
                             start_sort(&args);
 
                             // Apparantly it's illegal to render in a separate thread.
                             // Mutex locking doesn't work either
                             //
                             // pthread_create(&thread_id, NULL, start_sort, &args);
+
+                            break;
+                        }
+
+                        case SDLK_v: {
+                            int child_pipe[2];
+
+                            if (pipe(child_pipe) < 0) {
+                                perror("child_pipe");
+                            }
+
+                            printf("child_pipe[0]: %d, child_pipe[1]: %d\n", child_pipe[0], child_pipe[1]);
+
+                            args.ffmpeg = &(FFMpeg){.std_in = child_pipe[WRITE_END]};
+
+                            int child = fork();
+
+                            printf("child: %d\n", child);
+
+                            if (child == 0) {
+                                close(child_pipe[WRITE_END]);
+
+                                int dup_stdin = dup(STDIN_FILENO);
+
+                                if (dup_stdin < 0) {
+                                    perror("dup");
+                                    return -1;
+                                }
+
+                                if (dup2(child_pipe[READ_END], STDIN_FILENO) < 0) {
+                                    perror("dup2");
+                                    return -1;
+                                }
+
+                                char *argv[] = {"-f", "rawvideo", "-pixel_format", "rgba",    "-video_size", "894x702",
+                                                "-i", "-",        "-c:v",          "libx264", "thing.mp4",   NULL};
+
+                                int x = execvp("ffmpeg", argv);
+
+                                if (x != 0) {
+                                    perror("execv");
+                                    return x;
+                                }
+
+                                return -1;
+                            }
+
+                            close(child_pipe[READ_END]);
+
+                            args.render_to_video = 1;
+                            printf("Starting video render\n");
+                            sorting = 1;
+                            start_sort(&args);
 
                             break;
                         }
@@ -219,7 +291,7 @@ int main() {
         }
 
         if (!sorting) {
-            render_image(renderer, array, array_size, &image);
+            render_image(renderer, array, array_size, &image, NULL);
         }
     }
 
