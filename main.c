@@ -18,7 +18,7 @@
 #include "sort/sort.h"
 
 #define WIN_ASPECT_RATIO_FACTOR 100
-#define STRIP_WIDTH 100
+#define STRIP_WIDTH 20
 #define ANIMATION_DELAY_MS 0
 
 #define READ_END 0
@@ -174,7 +174,7 @@ int main() {
 
     Image image = {};
 
-    image.img_data = stbi_load("./testimage.jpg", &image.width, &image.height, &image.channels, 3);
+    image.img_data = stbi_load("./troll.jpg", &image.width, &image.height, &image.channels, 3);
 
     printf("channels: %d, img_width: %d, img_height: %d\n", image.channels, image.width, image.height);
 
@@ -196,7 +196,7 @@ int main() {
 
     int sorting = 0;
 
-    int array_size = image.width / STRIP_WIDTH;
+    int array_size = image.width / STRIP_WIDTH + 1;
     int array[array_size];
 
     for (int i = array_size - 1; i >= 0; i--) {
