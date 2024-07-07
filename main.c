@@ -12,12 +12,13 @@
 #include <stdio.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <wait.h>
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "sort/sort.h"
 
 #define WIN_ASPECT_RATIO_FACTOR 100
-#define STRIP_WIDTH 25
+#define STRIP_WIDTH 100
 #define ANIMATION_DELAY_MS 0
 
 #define READ_END 0
@@ -112,6 +113,8 @@ void paint_image_strip_slow_af(SDL_Renderer *renderer, Image *image, int img_str
     }
 }
 
+int count;
+
 void render_image(SDL_Renderer *renderer, int array[], size_t array_size, Image *image, FFMpeg *ffmpeg) {
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
     SDL_RenderClear(renderer);
@@ -124,27 +127,31 @@ void render_image(SDL_Renderer *renderer, int array[], size_t array_size, Image 
         SDL_Delay(ANIMATION_DELAY_MS);
     }
 
-    SDL_RenderPresent(renderer);
-
     if (ffmpeg != NULL) {
-        int size = image->width * image->height * sizeof(Uint32);
-        Uint32 *pixels = (Uint32 *)malloc(size);
+        int size = image->width * image->height * 3;
+        Uint8 *pixels = (Uint8 *)malloc(size);
 
-        int ret = SDL_RenderReadPixels(renderer, NULL, SDL_PIXELFORMAT_ARGB8888, pixels, image->width * sizeof(Uint32));
+        if (pixels == NULL) {
+            printf("Malloc failed. Buy more ram\n");
+            return;
+        }
+
+        int ret = SDL_RenderReadPixels(renderer, NULL, SDL_PIXELFORMAT_RGB24, pixels, image->width * 3);
 
         if (ret != 0) {
             fprintf(stderr, "SDL_RenderReadPixels failed: %s\n", SDL_GetError());
             free(pixels);
         }
 
-        FILE *f = fopen("pixels", "a");
-        fwrite(pixels, size, size, f);
+        int n = write(ffmpeg->std_in, pixels, size);
+        if (n < 0) {
+            perror("write failed");
+        }
 
-        // int n = write(ffmpeg->std_in, image->img_data, size);
-        // if (n != size) {
-        //     perror("write failed");
-        // }
+        free(pixels);
     }
+
+    SDL_RenderPresent(renderer);
 }
 
 void *start_sort(void *arg) {
@@ -167,7 +174,7 @@ int main() {
 
     Image image = {};
 
-    image.img_data = stbi_load("./troll.jpg", &image.width, &image.height, &image.channels, 3);
+    image.img_data = stbi_load("./testimage.jpg", &image.width, &image.height, &image.channels, 3);
 
     printf("channels: %d, img_width: %d, img_height: %d\n", image.channels, image.width, image.height);
 
@@ -204,6 +211,8 @@ int main() {
         .array_size = array_size,
     };
 
+    int child_pid;
+
     while (!quit) {
         while (SDL_PollEvent(&e) != 0) {
             switch (e.type) {
@@ -212,7 +221,8 @@ int main() {
 
                 case SDL_KEYDOWN: {
                     switch (e.key.keysym.sym) {
-                        case SDLK_ESCAPE: {
+                        case SDLK_ESCAPE:
+                        case SDLK_q: {
                             quit = 1;
                             break;
                         }
@@ -241,27 +251,24 @@ int main() {
 
                             args.ffmpeg = &(FFMpeg){.std_in = child_pipe[WRITE_END]};
 
-                            int child = fork();
+                            child_pid = fork();
 
-                            printf("child: %d\n", child);
+                            printf("child: %d\n", child_pid);
 
-                            if (child == 0) {
+                            if (child_pid == 0) {
                                 close(child_pipe[WRITE_END]);
-
-                                int dup_stdin = dup(STDIN_FILENO);
-
-                                if (dup_stdin < 0) {
-                                    perror("dup");
-                                    return -1;
-                                }
 
                                 if (dup2(child_pipe[READ_END], STDIN_FILENO) < 0) {
                                     perror("dup2");
                                     return -1;
                                 }
 
-                                char *argv[] = {"-f", "rawvideo", "-pixel_format", "rgba",    "-video_size", "894x702",
-                                                "-i", "-",        "-c:v",          "libx264", "thing.mp4",   NULL};
+                                char buf[20];
+                                int n = snprintf(buf, sizeof(buf), "%dx%d", image.width, image.height);
+
+                                char *argv[] = {"ffmpeg",        "-loglevel", "verbose",   "-y", "-f", "rawvideo", "-pixel_format",
+                                                "rgb24",          "-s",        buf,         "-i", "-",  "-c:v",     "libx264",
+                                                "-pixel_format", "yuv420p",   "thing.mp4", NULL};
 
                                 int x = execvp("ffmpeg", argv);
 
@@ -274,6 +281,8 @@ int main() {
                             }
 
                             close(child_pipe[READ_END]);
+
+                            sleep(1);
 
                             args.render_to_video = 1;
                             printf("Starting video render\n");
@@ -294,6 +303,9 @@ int main() {
             render_image(renderer, array, array_size, &image, NULL);
         }
     }
+
+    // int wstatus;
+    // waitpid(child_pid, &wstatus, 0);
 
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
